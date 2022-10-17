@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+        <title>Speech-to-text Demo</title>
+
+        <link rel="shortcut icon" href="django-icon.jpeg">
+        <link href="https://fonts.googleapis.com/css?family=Fira+Sans:400,500,600" rel="stylesheet">
+        <link rel="stylesheet" href="vendor/bootstrap-5.2.0-beta1-dist/css/bootstrap.min.css">
+        <link rel="stylesheet" href="vendor/fontawesome-free-6.1.1-web/css/all.min.css">
+        <script src="vendor/bootstrap-5.2.0-beta1-dist/js/bootstrap.bundle.min.js"></script>
+        <script src="vendor/fontawesome-free-6.1.1-web/js/all.min.js"></script>
+    </head>
+    <body>
+        <nav class="navbar sticky-top navbar-expand-lg navbar-light bg-light">
+            <div class="container">
+                <a class="navbar-brand" href="#">Speech-to-text Demo</a>
+                <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav"
+                        aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+            </div>
+        </nav>
+        <div class="container mt-4">
+            <div class="raw">
+                <button class="btn btn-success" id="btn-start-recording">Start Recording</button>
+                <button class="btn btn-danger" id="btn-stop-recording" disabled>Stop Recording</button>
+            </div>
+            <hr>
+            <audio controls autoplay playsinline></audio>
+            <div class="form-group mb-2">
+                <label for="token">API Token:</label>
+                <input id="token" name="token" class="form-control">
+            </div>
+            <div class="form-group mb-2">
+                <label for="provider">Choose provider:</label>
+                <select id="provider" name="provider" class="form-select">
+                    <option value="amazon">Amazon</option>
+                    <option value="google">Google</option>
+                    <option value="microsoft">Microsoft</option>
+                    <option value="deepgram">Deepgram</option>
+                </select>
+            </div>
+            <div class="form-group mb-2">
+                <label for="language">Choose language:</label>
+                <select id="language" name="language" class="form-select"></select>
+            </div>
+            <span id="errors" class="text-danger"></span>
+            <hr>
+            <label for="response">Response:</label>
+            <textarea id="response" class="form-control" rows="15"></textarea>
+        </div>
+        <script src="js/RecordRTC.js"></script>
+        <script>
+            var audio = document.querySelector('audio');
+            var ws, recorder;
+
+            var LANGUAGES = {
+                'google': [
+                    {'label': 'English', 'code': 'en-US'},
+                    {'label': 'French', 'code': 'fr-FR'},
+                    {'label': 'German', 'code': 'de-DE'},
+                    {'label': 'Hindi', 'code': 'hi-IN'},
+                    {'label': 'Portuguese', 'code': 'pt-PT'},
+                    {'label': 'Russian', 'code': 'ru-RU'},
+                    {'label': 'Spanish', 'code': 'es-ES'},
+                    {'label': 'Turkish', 'code': 'tr-TR'},
+                    {'label': 'Thai', 'code': 'th-TH'},
+                    {'label': 'Ukrainian', 'code': 'uk-UA'},
+                ],
+                'amazon': [
+                    {'label': 'English', 'code': 'en-US'},
+                    {'label': 'Dutch', 'code': 'nl-NL'},
+                    {'label': 'French', 'code': 'fr-FR'},
+                    {'label': 'German', 'code': 'de-DE'},
+                    {'label': 'Thai', 'code': 'th-TH'},
+                    {'label': 'Spanish', 'code': 'es-ES'},
+                    {'label': 'Japanese', 'code': 'ja-JP'},
+                    {'label': 'Korean', 'code': 'ko-KR'},
+                    {'label': 'Chinese', 'code': 'zh-CN'},
+                    {'label': 'Hindi', 'code': 'hi-IN'},
+                ],
+                'microsoft': [
+                    {'label': 'English', 'code': 'en-US'},
+                    {'label': 'French', 'code': 'fr-FR'},
+                    {'label': 'German', 'code': 'de-DE'},
+                    {'label': 'Russian', 'code': 'ru-RU'},
+                    {'label': 'Spanish', 'code': 'es-ES'},
+                    {'label': 'Korean', 'code': 'ko-KR'},
+                    {'label': 'Turkish', 'code': 'tr-TR'},
+                    {'label': 'Portuguese', 'code': 'pt-PT'},
+                    {'label': 'Ukrainian', 'code': 'uk-UA'},
+                    {'label': 'Swedish', 'code': 'sv-SE'},
+                ],
+                'deepgram': [
+                    {'label': 'English', 'code': 'en'},
+                    {'label': 'French', 'code': 'fr'},
+                    {'label': 'German', 'code': 'de'},
+                    {'label': 'Hindi', 'code': 'hi'},
+                    {'label': 'Portuguese', 'code': 'pt'},
+                    {'label': 'Russian', 'code': 'ru'},
+                    {'label': 'Spanish', 'code': 'es'},
+                    {'label': 'Turkish', 'code': 'tr'},
+                    {'label': 'India', 'code': 'en-IN'},
+                    {'label': 'Ukrainian', 'code': 'uk'}
+                ]
+            }
+
+            function captureMicrophone(callback) {
+                navigator.mediaDevices.getUserMedia({audio: true}).then(callback).catch(function (error) {
+                    alert('Unable to access your microphone.');
+                    console.error(error);
+                });
+            }
+
+            function stopRecordingCallback() {
+                audio.srcObject = null;
+                var blob = recorder.getBlob();
+                audio.src = URL.createObjectURL(blob);
+                recorder.microphone.stop();
+            }
+
+            document.querySelector('#btn-start-recording').onclick = function () {
+                const provider = document.querySelector('#provider').value;
+                const language = document.querySelector('#language').value;
+                const token = document.querySelector('#token').value;
+                document.querySelector('#errors').textContent = '';
+
+                this.disabled = true;
+                ws = new WebSocket(`ws://localhost:8000/ws/transcription/?token=${token}&stt_provider=${provider}&language=${language}`);
+
+                ws.onerror = () => {
+                    document.querySelector('#errors').textContent = 'Something went wrong, probably chosen provider is not working';
+                    document.querySelector('#btn-start-recording').disabled = false;
+                    recorder.stopRecording(stopRecordingCallback);
+                }
+
+                ws.onmessage = (message) => {
+                    let response = JSON.parse(message.data);
+                    let data = response.data;
+                    let errors = response.errors;
+
+                    if (data) {
+                        document.querySelector('#response').innerText = data.transcript;
+                    } else if (errors) {
+                        document.querySelector('#errors').textContent = errors[0];
+                        document.querySelector('#btn-start-recording').disabled = false;
+                        recorder.stopRecording(stopRecordingCallback);
+                    }
+                }
+
+                ws.onopen = () => {
+                    captureMicrophone(function (microphone) {
+                        audio.srcObject = microphone;
+
+                        recorder = new RecordRTC(microphone, {
+                            type: 'audio',
+                            disableLogs: true,
+                            recorderType: StereoAudioRecorder,
+                            numberOfAudioChannels: 1,
+                            desiredSampRate: 16000,
+                            timeSlice: 250,
+                            ondataavailable: function (blob) {
+                                const reader = new FileReader();
+                                reader.readAsDataURL(blob);
+
+                                reader.onloadend = function () {
+                                    let base64string = reader.result;
+                                    base64string = base64string.replace('data:audio/wav;base64,', '')
+
+                                    ws.send(JSON.stringify({
+                                        action: "transcribe",
+                                        request_id: new Date().getTime(),
+                                        voice_stream: base64string
+                                    }));
+                                }
+                            }
+                        });
+
+                        recorder.startRecording();
+                        recorder.microphone = microphone;
+                        document.querySelector('#btn-stop-recording').disabled = false;
+                    });
+                }
+            };
+
+            document.querySelector('#btn-stop-recording').onclick = function () {
+                this.disabled = true;
+                ws.close();
+                document.querySelector('#btn-start-recording').disabled = false;
+                recorder.stopRecording(stopRecordingCallback);
+            };
+
+            function setAvailableLanguages() {
+                let languageSelect = document.querySelector('#language');
+                languageSelect.innerHTML = '';
+                const provider = document.querySelector('#provider').value;
+                const lng_list = LANGUAGES[provider];
+                lng_list.forEach((item) => {
+                    var option = document.createElement('option');
+                    var {label, code} = item;
+                    option.value = code;
+                    option.label = label;
+                    languageSelect.appendChild(option);
+                });
+
+            }
+
+            window.onload = (event) => {
+                setAvailableLanguages();
+
+                document.querySelector('#provider').onchange = (event) => {
+                    setAvailableLanguages();
+                };
+            };
+        </script>
+    </body>
+</html>

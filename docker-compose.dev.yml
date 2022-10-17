@@ -1,0 +1,58 @@
+version: '3.8'
+
+x-django: &django
+  build:
+    context: .
+    dockerfile: ./docker/django/Dockerfile
+  image:  "${COMPOSE_IMAGES_PREFIX}_dev"
+  depends_on:
+    - postgres
+    - redis
+  volumes:
+    - ./src:/opt/project/src:cached
+    - ./data/dev:/data:z
+  env_file:
+    - ./.env
+
+services:
+  django:
+    <<: *django
+    ports:
+      - "8000:8000"
+    command: dev
+    # platform: x86_64
+    # entrypoint: /entrypoint dev
+  redis:
+    image: redis:6.0
+    volumes:
+      - dev_redis:/data
+  postgres:
+    build:
+      context: .
+      dockerfile: ./docker/postgres/Dockerfile
+    image: "${COMPOSE_IMAGES_PREFIX}_dev_postgres"
+    volumes:
+      - dev_postgres:/var/lib/postgresql/data:Z
+      - dev_backups:/backups:z
+    # ports:
+    #   - "5432:5432"
+    # environment:
+    #   - POSTGRES_ADDITIONAL_DATABASES=db1,db2
+    env_file:
+      - ./.env
+  staticserver:
+    build:
+      context: .
+      dockerfile: ./docker/staticserver/Dockerfile
+    image: "${COMPOSE_IMAGES_PREFIX}_dev_staticserver"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./src/config/static:/opt/project:cached
+    depends_on:
+      - django
+
+volumes:
+  dev_postgres:
+  dev_backups:
+  dev_redis:

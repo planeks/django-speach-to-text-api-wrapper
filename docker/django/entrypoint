@@ -1,0 +1,110 @@
+#!/bin/bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+PORT="${APP_PORT:-8000}"
+
+echo "Checking the necessary directories..."
+mkdir -p /data/staticfiles
+# mkdir -p /data/media
+
+if [ -z "${POSTGRES_USER}" ]; then
+    base_postgres_image_default_user='postgres'
+    export POSTGRES_USER="${base_postgres_image_default_user}"
+fi
+
+exitFunc() {
+  echo 'Exiting...'
+  exit -1
+}
+
+postgres_ready() {
+python << END
+import sys
+import psycopg2
+try:
+    psycopg2.connect(
+        dbname="${POSTGRES_DB}",
+        user="${POSTGRES_USER}",
+        password="${POSTGRES_PASSWORD}",
+        host="${POSTGRES_HOST}",
+        port="${POSTGRES_PORT}",
+    )
+except psycopg2.OperationalError:
+    sys.exit(-1)
+sys.exit(0)
+END
+}
+
+wait_for_postgres() {
+count=0
+trap exitFunc INT
+echo "Checking the PostgreSQL connection"
+until postgres_ready; do
+  count=$((count+1))
+  if [ $count -eq 10 ]; then
+      >&2 echo 'A waiting time has been reached. Exiting...'
+      exit -1
+  fi
+  >&2 echo 'Waiting for PostgreSQL to become available...'
+  sleep 2
+done
+>&2 echo 'PostgreSQL is available'
+}
+
+show_help() {
+    echo """
+Usage: docker-compose -f <yaml-file> run <service> COMMAND
+Commands
+prod     : Start django using a prod ready gunicorn server
+dev       : Start a normal Django development server
+bash      : Start a bash shell
+manage    : Start manage.py
+python    : Run a python command
+shell     : Start a Django Python shell
+pip-compile: Run pip-compile
+help      : Show this message
+"""
+}
+
+run_setup_commands(){
+  if [ "$COLLECTSTATIC_ON_STARTUP" = "1" ] ; then
+    python manage.py collectstatic --noinput
+  fi
+  python manage.py migrate
+}
+
+case "$1" in
+    dev)
+        wait_for_postgres
+        exec python manage.py runserver 0.0.0.0:"${PORT}"
+    ;;
+    prod)
+        wait_for_postgres
+        run_setup_commands
+
+        # Use the next line instead of previous one if you want to support Django channels
+        exec /usr/local/bin/gunicorn config.asgi --bind 0.0.0.0:"${PORT}" --chdir=/opt/project/src -k uvicorn.workers.UvicornWorker
+    ;;
+    bash)
+        exec /bin/bash "${@:2}"
+    ;;
+    manage)
+        exec python manage.py "${@:2}"
+    ;;
+    python)
+        exec python "${@:2}"
+    ;;
+    shell)
+        exec python manage.py shell
+    ;;
+    pip-compile)
+        exec pip-compile requirements.in
+    ;;
+    *)
+        show_help
+        exit 1
+    ;;
+esac

@@ -1,0 +1,56 @@
+version: '3.8'
+
+x-django: &django
+  build:
+    context: .
+    dockerfile: ./docker/django/Dockerfile
+  restart: always
+  image: "${COMPOSE_IMAGES_PREFIX}_prod"
+  depends_on:
+    - postgres
+    - redis
+  volumes:
+    - ./src:/opt/project/src:cached
+    - ./data/prod:/data:z
+  env_file:
+    - ./.env
+
+services:
+  django:
+    <<: *django
+    command: prod
+  postgres:
+    build:
+      context: .
+      dockerfile: ./docker/postgres/Dockerfile
+    image: "${COMPOSE_IMAGES_PREFIX}_prod_postgres"
+    restart: always
+    volumes:
+      - prod_postgres:/var/lib/postgresql/data:Z
+      - prod_backups:/backups:z
+    env_file:
+      - ./.env
+  redis:
+    image: redis:6.0
+    restart: always    
+  caddy:
+    build:
+      context: .
+      dockerfile: ./docker/caddy/Dockerfile
+    image: "${COMPOSE_IMAGES_PREFIX}_prod_caddy"
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - prod_caddy:/data
+    env_file:
+      - ./.env
+    depends_on:
+      - django
+
+volumes:
+  prod_postgres:
+  prod_backups:
+  prod_redis:
+  prod_caddy:
